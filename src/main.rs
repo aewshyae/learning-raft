@@ -1,34 +1,48 @@
 // Raftノードを立ち上げるサーバー
-use std::{net::SocketAddr};
+use std::{net::SocketAddr, collections::HashMap};
 
-use raftpico::{Server, FileStorage};
+use raftpico::{Server, FileStorage, Machine, ApplyContext};
+use serde::{Deserialize, Serialize};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let listen_addr: SocketAddr = format!("IPアドレス:TCPポート ".parse()?;
-    let storage_path = Some(FileStorage::new(format!("ファイルパス"))?);
+    let port: u16 = std::env::args().nth(1).and_then(|a| a.parse().ok()).expect("invalid command line arg");
 
-    // Raftノードとして動作するサーバーを構築
-    let mut server = Server::<type_>::start(listen_addr, storage)?;
+    let listen_addr: SocketAddr = format!("127.0.0.1:{port}").parse()?;
+    let storage = Some(FileStorage::new(format!("raftkvs-{port}.jsonl"))?);
 
-    // サーバーの処理を実行する
+    let mut server = Server::<KvsMachine>::start(listen_addr, storage)?;
+
     loop {
         server.poll(None)?;
     }
 }
 
-
 // ステートマシン
-use std::{collections::HashMap};
-
-use raftpico::Machine;
-use serde::{Deserialize, Serialize};
-
+#[derive(Debug, Default, Serialize, Deserialize)]
 struct KvsMachine {
     entries: HashMap<String, serde_json::Value>,
 }
 
 // KVSサーバー(JSON-RPC)
 impl Machine for KvsMachine {
+    // KvsInputに対応するKVSサーバーの動作
+    type Input = KvsInput;
+    fn apply(&mut self, ctx: &mut ApplyContext, input: Self::Input) {
+        match input {
+            KvsInput::Put { key, value } => {
+                let old_value = self.entries.insert(key, value);
+                ctx.output(&old_value);
+            }
+            KvsInput::Get { key } => {
+                let value = self.entries.get(&key);
+                ctx.output(&value);
+            }
+            KvsInput::Delete { key } => {
+                let value = self.entries.remove(&key);
+                ctx.output(&value);
+            }
+        }
+    }
 
 }
 
@@ -46,25 +60,4 @@ enum KvsInput {
         key: String,
     }
 }
-
-// KvsInputに対応するKVSサーバーの動作
-// self -> KvsMachine
-// ApplyContext : from raftpico
-type Input = KvsInput;
-fn apply(&mut self, ctx: &mut ApplyContext, input: Self::Input) {
-    match input {
-        KvsInput::Put { key, value } => {
-            let old_value = self.entries.insert(key, value);
-            ctx.output(&old_value);
-        }
-        KvsInput::Get { key } => {
-            let value = self.entries.get(&key);
-            ctx.output(&value);
-        }
-        KvsInput::Delete { key } => {
-            let value = self.entries.remove(&key);
-            ctx.output(&value);
-        }
-    }
-};
 
